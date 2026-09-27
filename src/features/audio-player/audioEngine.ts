@@ -116,6 +116,8 @@ export const startAllAudioLayers = () => {
 export const startAudioSourceForLayer = (layer: SoundCategory) => {
     if (!audioBuffers[layer]) return;
     const audioContext = ensureInitialized();
+    //Stop the running source first, otherwise it is orphaned and keeps playing
+    stopAudioSourceForLayer(layer);
     const newSource = audioContext!.createBufferSource();
     newSource.buffer = audioBuffers[layer];
     newSource.loop = true;
@@ -153,6 +155,7 @@ const loadBuffer = async (url: string): Promise<AudioBuffer> => {
 };
 
 export const setIsPlaying = (playing: boolean) => {
+    if (isPlaying === playing) return;
     isPlaying = playing;
     if (isPlaying) {
         startAllAudioLayers();
@@ -201,7 +204,7 @@ export const setBinauralBeatAsync = async (newBinauralBeat: BinauralBeat | null)
     if (isPlaying) startBinauralBeat();
 }
 
-const getOscillator = (frequency: number, side: "left" | "right"): OscillatorNode => {
+const startOscillator = (frequency: number, side: "left" | "right"): OscillatorNode => {
     const context = ensureInitialized();
 
     const osc = context.createOscillator();
@@ -209,29 +212,33 @@ const getOscillator = (frequency: number, side: "left" | "right"): OscillatorNod
     osc.frequency.value = frequency;
     const pan = context.createStereoPanner();
     pan.pan.value = side === "left" ? -1 : 1;
+    //The oscillator must reach the gain through the panner, otherwise both ears
+    //get both frequencies and there is no binaural beat
     osc.connect(pan);
+    pan.connect(gains![SoundCategory.BinauralBeats]);
+    osc.onended = () => pan.disconnect();
+    osc.start();
     return osc;
 }
 
 const startBinauralBeat = () => {
     if (!binauralBeat) return;
+    //Stop the running oscillators first, otherwise they are orphaned: stopBinauralBeat
+    //can only reach the pair currently held in binauralOscillators
+    stopBinauralBeat();
 
-    const oscL = getOscillator(binauralBeat.carrier, "left");
-    const oscR = getOscillator(binauralBeat.carrier + binauralBeat.delta, "right");
-    binauralOscillators = [oscL, oscR];
-    binauralOscillators?.map((osc) => {
-        try {
-            osc.connect(gains![SoundCategory.BinauralBeats]);
-            osc.start();
-        } catch (e) { }
-    });
+    binauralOscillators = [
+        startOscillator(binauralBeat.carrier, "left"),
+        startOscillator(binauralBeat.carrier + binauralBeat.delta, "right"),
+    ];
 }
 
 const stopBinauralBeat = () => {
-    binauralOscillators?.map((osc) => {
+    binauralOscillators?.forEach((osc) => {
         try {
             osc.stop();
         } catch (e) { }
+        osc.disconnect();
     });
     binauralOscillators = null;
 }
