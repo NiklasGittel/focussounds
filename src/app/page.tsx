@@ -6,14 +6,14 @@ import { getBinauralBeats, getMusicTracks, getWhiteNoise } from "@/features/audi
 export default function Home() {
 
   return (
-    <main className="flex flex-col min-h-full h-full items-center p-16 pb-4 ">
+    <main className="flex flex-1 flex-col items-center w-full px-0 pt-8 pb-4 sm:px-4 sm:pt-12 lg:px-16 lg:pt-16">
       <AudioControllerInitializer />
-      <div className="flex flex-col flex-1 gap-8 w-full">
+      <div className="flex flex-col flex-1 gap-6 sm:gap-8 w-full">
         <SoundCardRow sounds={getMusicTracks()} label="Music" />
         <SoundCardRow sounds={getBinauralBeats()} label="Binaural Beats" />
         <SoundCardRow sounds={getWhiteNoise()} label="White Noise" />
       </div>
-      <div className="flex flex-col items-center sm:items-start">
+      <div className="flex flex-col items-center pt-8">
         <AudioControls />
       </div>
     </main>
