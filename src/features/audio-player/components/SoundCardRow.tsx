@@ -48,8 +48,8 @@ const SoundCardRow = ({ sounds, label }: SoundCardRowProps) => {
 
     return (
         <div>
-            <Label className="text-lg font-semibold mb-2 text-muted-foreground">{label}</Label>
-            <div className="flex flex-row justify-start w-full gap-6">
+            <Label className="text-base sm:text-lg font-semibold mb-2 text-muted-foreground">{label}</Label>
+            <div className="grid grid-cols-3 gap-3 w-full sm:flex sm:flex-row sm:flex-wrap sm:justify-start sm:gap-4 lg:gap-6">
                 {sounds.map((sound) => (
                     <SoundCard key={sound.id} sound={sound} isActive={activeSoundForCategory(sound.category)?.id === sound.id} onClick={() => onClick(sound)} />
                 ))}
