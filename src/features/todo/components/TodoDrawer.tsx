@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ListChecksIcon, PlusIcon } from "lucide-react";
+import { ListChecksIcon, PlusIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -43,11 +43,12 @@ const TodoDrawer = () => {
             />
             <DrawerContent className="mx-auto sm:max-w-md">
                 <DrawerHeader>
-                    <DrawerTitle>To-do</DrawerTitle>
+                    <DrawerTitle className="flex justify-between items-center">To-do<DrawerClose render={<Button variant="ghost" size="icon" className="text-muted-foreground"><X /></Button>} />
+                    </DrawerTitle>
                     <DrawerDescription>
                         {todos.length === 0
                             ? ""
-                            :  openTodos === 0 ? "All done." :  `${openTodos} open, ${completedTodos} done.`}
+                            : openTodos === 0 ? "All done." : `${openTodos} open, ${completedTodos} done.`}
                     </DrawerDescription>
                 </DrawerHeader>
 
@@ -88,7 +89,6 @@ const TodoDrawer = () => {
                     </Button>
                 </div>
                 <DrawerFooter>
-                    <DrawerClose render={<Button variant="outline">Close</Button>} />
                 </DrawerFooter>
             </DrawerContent>
         </Drawer>
