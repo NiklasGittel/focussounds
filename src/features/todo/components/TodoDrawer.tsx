@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
     Drawer,
+    DrawerClose,
     DrawerContent,
     DrawerDescription,
+    DrawerFooter,
     DrawerHeader,
     DrawerTitle,
     DrawerTrigger,
@@ -30,7 +32,7 @@ const TodoDrawer = () => {
 
     return (
         <Drawer showSwipeHandle
-        swipeDirection="right">
+            swipeDirection="right" modal={false} disablePointerDismissal >
 
             <DrawerTrigger
                 render={
@@ -44,8 +46,8 @@ const TodoDrawer = () => {
                     <DrawerTitle>To-do</DrawerTitle>
                     <DrawerDescription>
                         {todos.length === 0
-                            ? "Add what you want to get done this session."
-                            : `${openTodos} open, ${completedTodos} done.`}
+                            ? ""
+                            :  openTodos === 0 ? "All done." :  `${openTodos} open, ${completedTodos} done.`}
                     </DrawerDescription>
                 </DrawerHeader>
 
@@ -85,6 +87,9 @@ const TodoDrawer = () => {
                         Clear completed
                     </Button>
                 </div>
+                <DrawerFooter>
+                    <DrawerClose render={<Button variant="outline">Close</Button>} />
+                </DrawerFooter>
             </DrawerContent>
         </Drawer>
     );
