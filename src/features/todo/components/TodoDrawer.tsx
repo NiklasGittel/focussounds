@@ -29,7 +29,9 @@ const TodoDrawer = () => {
     };
 
     return (
-        <Drawer showSwipeHandle>
+        <Drawer showSwipeHandle
+        swipeDirection="right">
+
             <DrawerTrigger
                 render={
                     <Button variant="outline" size="icon" aria-label="Open to-do list">
