@@ -1,5 +1,5 @@
 import { SoundCategory } from "@/shared/types/soundCategory";
-import type { MusicTrack } from "@/shared/types/musicTrack";
+import type { MusicGenre } from "@/shared/types/musicGenre";
 import { BinauralBeat } from "@/shared/types/binauralBeat";
 import { WhiteNoise } from "@/shared/types/whitenoise";
 
@@ -31,6 +31,15 @@ const audioBuffers: Record<SoundCategory, AudioBuffer | null> = {
 
 let binauralOscillators: OscillatorNode[] | null = null;
 let binauralBeat: BinauralBeat | null = null;
+
+//Music streams through an <audio> element instead of a decoded buffer, so that full
+//length songs start immediately, keep memory flat and report a real "ended" event
+let musicElement: HTMLAudioElement | null = null;
+let musicSourceNode: MediaElementAudioSourceNode | null = null;
+let musicGenre: MusicGenre | null = null;
+let musicSongIndex = 0;
+//Counts consecutive failed songs so a genre of unplayable files cannot spin forever
+let musicErrorStreak = 0;
 const ensureInitialized = () => {
     if (audioContext && gains) {
         if (audioContext.state === "suspended") void audioContext.resume();
@@ -102,6 +111,8 @@ export const stopAllAudioLayers = () => {
     }
     //Quickfix
     stopBinauralBeat();
+    //Pausing keeps currentTime, so playing again resumes the song where it left off
+    musicElement?.pause();
 };
 
 export const startAllAudioLayers = () => {
@@ -111,6 +122,7 @@ export const startAllAudioLayers = () => {
     }
     //Quickfix
     startBinauralBeat();
+    if (musicGenre) void musicElement?.play().catch(() => { });
 };
 
 export const startAudioSourceForLayer = (layer: SoundCategory) => {
@@ -126,7 +138,7 @@ export const startAudioSourceForLayer = (layer: SoundCategory) => {
     newSource.start();
 };
 
-const getSoundUrl = (sound: MusicTrack | WhiteNoise) => {
+const getSoundUrl = (sound: WhiteNoise) => {
     return `/sounds/${sound.category}/${sound.id}`;
 };
 
@@ -167,20 +179,90 @@ export const setIsPlaying = (playing: boolean) => {
 
 //Music -------------------------------------------------------------------------------------------------
 
-export const setMusicTrackAsync = async (track: MusicTrack | null) => {
-    ensureInitialized();
-    if (!track) {
-        stopAudioSourceForLayer(SoundCategory.Music);
+const getSongUrl = (genre: MusicGenre, song: string) => {
+    return `/sounds/${genre.category}/${genre.id}/${song}`;
+};
+
+//createMediaElementSource may only be called once per element, so the element and its
+//source node are built once and every song reuses them by reassigning src
+const ensureMusicElement = () => {
+    const context = ensureInitialized();
+    if (musicElement) return musicElement;
+
+    musicElement = new Audio();
+    musicElement.preload = "auto";
+    //No crossOrigin: the files are served from this same origin, so it would buy nothing
+    musicSourceNode = context.createMediaElementSource(musicElement);
+    musicSourceNode.connect(gains![SoundCategory.Music]);
+    //"ended" only fires on a natural end, never on pause or on switching src
+    musicElement.addEventListener("ended", playNextSong);
+    //A song the browser cannot play (missing file, unsupported codec) is skipped
+    musicElement.addEventListener("error", skipUnplayableSong);
+    return musicElement;
+};
+
+const loadCurrentSong = () => {
+    if (!musicGenre || musicGenre.songs.length === 0) return;
+    const element = ensureMusicElement();
+    //A single song has nothing to advance to, so let the element loop it natively
+    element.loop = musicGenre.songs.length === 1;
+    element.src = getSongUrl(musicGenre, musicGenre.songs[musicSongIndex]);
+    //Rejects until the first user gesture, same as a suspended AudioContext
+    if (isPlaying) void element.play().catch(() => { });
+};
+
+const playNextSong = () => {
+    if (!musicGenre || musicGenre.songs.length === 0) return;
+    musicErrorStreak = 0;
+    musicSongIndex = (musicSongIndex + 1) % musicGenre.songs.length;
+    loadCurrentSong();
+};
+
+const skipUnplayableSong = () => {
+    if (!musicGenre || musicGenre.songs.length === 0) return;
+    console.warn(`[audioEngine] cannot play ${musicGenre.songs[musicSongIndex]}, skipping`);
+    //Give up once every song in the genre has failed in a row
+    if (++musicErrorStreak >= musicGenre.songs.length) {
+        musicErrorStreak = 0;
         return;
     }
-    const url = getSoundUrl(track);
-    const buffer = await loadBuffer(url);
-    if (buffer.length === 0) return;
-    switchAudioBufferForCategory(track.category, buffer);
-    if (isPlaying) startAudioSourceForLayer(track.category);
+    musicSongIndex = (musicSongIndex + 1) % musicGenre.songs.length;
+    loadCurrentSong();
+};
+
+export const setMusicGenreAsync = async (newMusicGenre: MusicGenre | null) => {
+    ensureInitialized();
+    if (!newMusicGenre) {
+        musicElement?.pause();
+        musicGenre = null;
+        musicSongIndex = 0;
+        return;
+    }
+    //Re-selecting the running genre would otherwise restart the current song
+    if (musicGenre?.id === newMusicGenre.id) return;
+    musicGenre = newMusicGenre;
+    musicSongIndex = 0;
+    musicErrorStreak = 0;
+    loadCurrentSong();
 }
 
-//Music -------------------------------------------------------------------------------------------------
+//Dev-only inspection handle; Next inlines NODE_ENV so this is stripped from the build
+if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+    (window as unknown as Record<string, unknown>).__music = {
+        element: () => musicElement,
+        state: () => ({
+            genre: musicGenre?.id ?? null,
+            song: musicGenre?.songs[musicSongIndex] ?? null,
+            index: musicSongIndex,
+            currentTime: musicElement?.currentTime,
+            duration: musicElement?.duration,
+            paused: musicElement?.paused,
+            isPlaying,
+        }),
+    };
+}
+
+//White noise -------------------------------------------------------------------------------------------
 
 export const setWhitenoiseAsync = async (whitenoise: WhiteNoise | null) => {
     ensureInitialized();
