@@ -38,6 +38,11 @@ let musicElement: HTMLAudioElement | null = null;
 let musicSourceNode: MediaElementAudioSourceNode | null = null;
 let musicGenre: MusicGenre | null = null;
 let musicSongIndex = 0;
+//Where each genre was left, by genre id, so switching back picks up the same song at
+//the same position instead of starting over. Per session only, not persisted.
+const musicProgress = new Map<string, { songIndex: number; time: number }>();
+//currentTime can only be set once the song has metadata, so the seek waits for it
+let pendingSeek: (() => void) | null = null;
 //Counts consecutive failed songs so a genre of unplayable files cannot spin forever
 let musicErrorStreak = 0;
 const ensureInitialized = () => {
@@ -231,14 +236,38 @@ const ensureMusicElement = () => {
     return musicElement;
 };
 
-const loadCurrentSong = () => {
+const loadCurrentSong = (startAt = 0) => {
     if (!musicGenre || musicGenre.songs.length === 0) return;
     const element = ensureMusicElement();
+
+    //Drop a seek still waiting on the previous song, or it would move this one
+    if (pendingSeek) {
+        element.removeEventListener("loadedmetadata", pendingSeek);
+        pendingSeek = null;
+    }
+
     //A single song has nothing to advance to, so let the element loop it natively
     element.loop = musicGenre.songs.length === 1;
     element.src = getSongUrl(musicGenre, musicGenre.songs[musicSongIndex]);
+
+    if (startAt > 0) {
+        pendingSeek = () => {
+            element.currentTime = startAt;
+            pendingSeek = null;
+        };
+        element.addEventListener("loadedmetadata", pendingSeek, { once: true });
+    }
+
     //Rejects until the first user gesture, same as a suspended AudioContext
     if (isPlaying) void element.play().catch(onPlayRejected);
+};
+
+const rememberGenreProgress = () => {
+    if (!musicGenre || !musicElement) return;
+    musicProgress.set(musicGenre.id, {
+        songIndex: musicSongIndex,
+        time: musicElement.currentTime,
+    });
 };
 
 const playNextSong = () => {
@@ -262,18 +291,27 @@ const skipUnplayableSong = () => {
 
 export const setMusicGenreAsync = async (newMusicGenre: MusicGenre | null) => {
     ensureInitialized();
+    //Re-selecting the running genre would otherwise restart the current song
+    if (musicGenre?.id === newMusicGenre?.id) return;
+
+    rememberGenreProgress();
+
     if (!newMusicGenre) {
         musicElement?.pause();
         musicGenre = null;
         musicSongIndex = 0;
         return;
     }
-    //Re-selecting the running genre would otherwise restart the current song
-    if (musicGenre?.id === newMusicGenre.id) return;
+
     musicGenre = newMusicGenre;
-    musicSongIndex = 0;
     musicErrorStreak = 0;
-    loadCurrentSong();
+
+    const progress = musicProgress.get(newMusicGenre.id);
+    //A saved index can point past the end once the song list is edited
+    musicSongIndex = progress && progress.songIndex < newMusicGenre.songs.length
+        ? progress.songIndex
+        : 0;
+    loadCurrentSong(musicSongIndex === progress?.songIndex ? progress.time : 0);
 }
 
 //Dev-only inspection handle; Next inlines NODE_ENV so this is stripped from the build
@@ -289,6 +327,7 @@ if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
             paused: musicElement?.paused,
             isPlaying,
         }),
+        progress: () => Object.fromEntries(musicProgress),
     };
 }
 
