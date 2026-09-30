@@ -368,9 +368,17 @@ const onDeckEnded = (deck: MusicDeck) => {
 };
 
 const onDeckError = (deck: MusicDeck) => {
-    if (!musicGenre || musicGenre.songs.length === 0) return;
+    if (!musicGenre || musicGenre.songs.length === 0 || !musicDecks) return;
     //An empty src is the pause path clearing a deck, not a broken file
     if (!deck.element.getAttribute("src")) return;
+
+    //A standby deck failing only means the song it preloaded is unusable. The song that
+    //is actually playing must not be cut short for it; it is skipped when its turn comes.
+    if (deck !== activeDeck()) {
+        console.warn(`[audioEngine] could not preload the next song in ${musicGenre.id}`);
+        preloadedSongIndex = null;
+        return;
+    }
 
     console.warn(`[audioEngine] cannot play ${musicGenre.songs[musicSongIndex]}, skipping`);
     //Give up once every song in the genre has failed in a row
