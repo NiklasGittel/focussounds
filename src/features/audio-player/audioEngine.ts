@@ -74,9 +74,9 @@ const ensureInitialized = () => {
     return audioContext;
 };
 
-//Browsers refuse to start audio before the page has been interacted with. When that
-//happens we wait for the first interaction anywhere and start everything then, so a
-//reload with isPlaying persisted does not sit silently until the user hits play.
+//Playback can be refused, or the AudioContext can fall back to suspended, when the
+//page has no user activation - a backgrounded tab on iOS is the usual case. We then
+//wait for the first interaction anywhere and pick the transport back up there.
 let isWaitingForGesture = false;
 
 const startOnNextGesture = () => {

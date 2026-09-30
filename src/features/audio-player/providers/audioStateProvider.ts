@@ -48,6 +48,13 @@ export const useAudioState = create<AudioState>()(
                 {
                     name: 'audio-state-storage',
                     version: 1,
+                    //isPlaying is deliberately left out so a reload always starts paused
+                    partialize: (state) => ({
+                        musicGenre: state.musicGenre,
+                        binauralBeat: state.binauralBeat,
+                        whitenoise: state.whitenoise,
+                        volumes: state.volumes,
+                    }),
                     migrate: (persisted: unknown, version: number) => {
                         if (version === 0) {
                             //v0 stored a single musicTrack whose id was a filename,
@@ -67,6 +74,8 @@ export const useAudioState = create<AudioState>()(
                         return {
                             ...current,
                             ...stored,
+                            //A payload saved before partialize still carries isPlaying
+                            isPlaying: false,
                             musicGenre: storedGenreId
                                 ? getMusicGenres().find((genre) => genre.id === storedGenreId) ?? null
                                 : null,
