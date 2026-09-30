@@ -74,6 +74,34 @@ const ensureInitialized = () => {
     return audioContext;
 };
 
+//Browsers refuse to start audio before the page has been interacted with. When that
+//happens we wait for the first interaction anywhere and start everything then, so a
+//reload with isPlaying persisted does not sit silently until the user hits play.
+let isWaitingForGesture = false;
+
+const startOnNextGesture = () => {
+    if (isWaitingForGesture || typeof document === "undefined") return;
+    isWaitingForGesture = true;
+
+    const onGesture = () => {
+        isWaitingForGesture = false;
+        document.removeEventListener("pointerdown", onGesture, true);
+        document.removeEventListener("keydown", onGesture, true);
+        if (!isPlaying) return;
+        void audioContext?.resume();
+        void musicElement?.play().catch(() => { });
+    };
+
+    document.addEventListener("pointerdown", onGesture, { capture: true, once: true });
+    document.addEventListener("keydown", onGesture, { capture: true, once: true });
+};
+
+//An AbortError only means a newer song replaced this one mid-load, which is expected
+const onPlayRejected = (error: unknown) => {
+    if ((error as DOMException)?.name === "AbortError") return;
+    startOnNextGesture();
+};
+
 export const setVolume = (layer: Layer, volume: number) => {
     if (!gains) return;
     gains[layer].gain.value = volume;
@@ -122,7 +150,9 @@ export const startAllAudioLayers = () => {
     }
     //Quickfix
     startBinauralBeat();
-    if (musicGenre) void musicElement?.play().catch(() => { });
+    if (musicGenre) void musicElement?.play().catch(onPlayRejected);
+    //The oscillators and buffer sources are silent too while the context is suspended
+    if (audioContext?.state !== "running") startOnNextGesture();
 };
 
 export const startAudioSourceForLayer = (layer: SoundCategory) => {
@@ -208,7 +238,7 @@ const loadCurrentSong = () => {
     element.loop = musicGenre.songs.length === 1;
     element.src = getSongUrl(musicGenre, musicGenre.songs[musicSongIndex]);
     //Rejects until the first user gesture, same as a suspended AudioContext
-    if (isPlaying) void element.play().catch(() => { });
+    if (isPlaying) void element.play().catch(onPlayRejected);
 };
 
 const playNextSong = () => {
