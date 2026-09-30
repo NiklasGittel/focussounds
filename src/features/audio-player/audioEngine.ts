@@ -32,10 +32,8 @@ const audioBuffers: Record<SoundCategory, AudioBuffer | null> = {
 let binauralOscillators: OscillatorNode[] | null = null;
 let binauralBeat: BinauralBeat | null = null;
 
-//Music streams through an <audio> element instead of a decoded buffer, so that full
-//length songs start immediately, keep memory flat and report a real "ended" event
-let musicElement: HTMLAudioElement | null = null;
-let musicSourceNode: MediaElementAudioSourceNode | null = null;
+//Music streams through <audio> elements instead of decoded buffers, so that full
+//length songs start immediately and keep memory flat
 let musicGenre: MusicGenre | null = null;
 let musicSongIndex = 0;
 //Where each genre was left, by genre id, so switching back picks up the same song at
@@ -43,11 +41,7 @@ let musicSongIndex = 0;
 const musicProgress = new Map<string, { songIndex: number; time: number }>();
 //currentTime can only be set once the song has metadata, so the seek waits for it
 let pendingSeek: (() => void) | null = null;
-//Songs fade in and out through their own gain node, kept separate from the music layer
-//gain so that fading never fights the volume slider
-const MUSIC_FADE_SECONDS = 0.8;
-let musicFadeGain: GainNode | null = null;
-let isFadingOut = false;
+
 //Counts consecutive failed songs so a genre of unplayable files cannot spin forever
 let musicErrorStreak = 0;
 const ensureInitialized = () => {
@@ -99,7 +93,7 @@ const startOnNextGesture = () => {
         document.removeEventListener("keydown", onGesture, true);
         if (!isPlaying) return;
         void audioContext?.resume();
-        void musicElement?.play().catch(() => { });
+        resumeMusic();
     };
 
     document.addEventListener("pointerdown", onGesture, { capture: true, once: true });
@@ -150,7 +144,7 @@ export const stopAllAudioLayers = () => {
     //Quickfix
     stopBinauralBeat();
     //Pausing keeps currentTime, so playing again resumes the song where it left off
-    musicElement?.pause();
+    pauseMusic();
 };
 
 export const startAllAudioLayers = () => {
@@ -160,7 +154,7 @@ export const startAllAudioLayers = () => {
     }
     //Quickfix
     startBinauralBeat();
-    if (musicGenre) void musicElement?.play().catch(onPlayRejected);
+    resumeMusic();
     //The oscillators and buffer sources are silent too while the context is suspended
     if (audioContext?.state !== "running") startOnNextGesture();
 };
@@ -219,109 +213,165 @@ export const setIsPlaying = (playing: boolean) => {
 
 //Music -------------------------------------------------------------------------------------------------
 
+//Two decks so one song can fade up while the other fades down. createMediaElementSource
+//may only be called once per element, so each deck keeps its element for the lifetime of
+//the page and only ever swaps src.
+interface MusicDeck {
+    element: HTMLAudioElement;
+    gain: GainNode;
+}
+
+const MUSIC_CROSSFADE_SECONDS = 2.5;
+//The next song is loaded this far from the end so it is buffered when the crossfade starts
+const MUSIC_PRELOAD_LEAD_SECONDS = MUSIC_CROSSFADE_SECONDS + 5;
+//Starting or resuming a genre fades in faster than a crossfade between songs
+const MUSIC_FADE_IN_SECONDS = 0.8;
+
+let musicDecks: MusicDeck[] | null = null;
+let activeDeckIndex = 0;
+let isCrossfading = false;
+let crossfadeTimeout: number | null = null;
+let preloadedSongIndex: number | null = null;
+let deckAwaitingFadeIn: MusicDeck | null = null;
+
 const getSongUrl = (genre: MusicGenre, song: string) => {
-    return `/sounds/${genre.category}/${genre.id}/${song}`;
+    //Filenames may contain spaces and brackets, so the song segment is encoded
+    return `/sounds/${genre.category}/${genre.id}/${encodeURIComponent(song)}`;
 };
 
-//createMediaElementSource may only be called once per element, so the element and its
-//source node are built once and every song reuses them by reassigning src
-const ensureMusicElement = () => {
+const activeDeck = () => musicDecks![activeDeckIndex];
+const standbyDeck = () => musicDecks![1 - activeDeckIndex];
+
+const setGainNow = (deck: MusicDeck, value: number) => {
+    if (!audioContext) return;
+    const now = audioContext.currentTime;
+    deck.gain.gain.cancelScheduledValues(now);
+    deck.gain.gain.setValueAtTime(value, now);
+};
+
+const rampGain = (deck: MusicDeck, target: number, seconds: number) => {
+    if (!audioContext) return;
+    const now = audioContext.currentTime;
+    deck.gain.gain.cancelScheduledValues(now);
+    deck.gain.gain.setValueAtTime(deck.gain.gain.value, now);
+    deck.gain.gain.linearRampToValueAtTime(target, now + Math.max(seconds, 0.01));
+};
+
+const ensureMusicDecks = () => {
     const context = ensureInitialized();
-    if (musicElement) return musicElement;
+    if (musicDecks) return musicDecks;
 
-    musicElement = new Audio();
-    musicElement.preload = "auto";
-    //No crossOrigin: the files are served from this same origin, so it would buy nothing
-    musicFadeGain = context.createGain();
-    musicFadeGain.gain.value = 1;
-    musicFadeGain.connect(gains![SoundCategory.Music]);
+    musicDecks = [0, 1].map(() => {
+        const element = new Audio();
+        element.preload = "auto";
 
-    musicSourceNode = context.createMediaElementSource(musicElement);
-    musicSourceNode.connect(musicFadeGain);
-    //"ended" only fires on a natural end, never on pause or on switching src
-    musicElement.addEventListener("ended", playNextSong);
-    //A song the browser cannot play (missing file, unsupported codec) is skipped
-    musicElement.addEventListener("error", skipUnplayableSong);
-    //"playing" is when audio actually starts, which is when the fade in should begin
-    musicElement.addEventListener("playing", fadeMusicIn);
-    musicElement.addEventListener("timeupdate", fadeMusicOutBeforeEnd);
-    return musicElement;
-};
+        const gain = context.createGain();
+        //Decks start silent; every transition ramps them explicitly
+        gain.gain.value = 0;
+        gain.connect(gains![SoundCategory.Music]);
+        context.createMediaElementSource(element).connect(gain);
 
-const loadCurrentSong = (startAt = 0) => {
-    if (!musicGenre || musicGenre.songs.length === 0) return;
-    const element = ensureMusicElement();
-
-    //Drop a seek still waiting on the previous song, or it would move this one
-    if (pendingSeek) {
-        element.removeEventListener("loadedmetadata", pendingSeek);
-        pendingSeek = null;
-    }
-
-    //A single song has nothing to advance to, so let the element loop it natively
-    element.loop = musicGenre.songs.length === 1;
-    //Silent until "playing" fades it in, so a new song cannot burst in at full volume
-    if (musicFadeGain && audioContext) {
-        isFadingOut = false;
-        musicFadeGain.gain.cancelScheduledValues(audioContext.currentTime);
-        musicFadeGain.gain.value = 0;
-    }
-    element.src = getSongUrl(musicGenre, musicGenre.songs[musicSongIndex]);
-
-    if (startAt > 0) {
-        pendingSeek = () => {
-            element.currentTime = startAt;
-            pendingSeek = null;
-        };
-        element.addEventListener("loadedmetadata", pendingSeek, { once: true });
-    }
-
-    //Rejects until the first user gesture, same as a suspended AudioContext
-    if (isPlaying) void element.play().catch(onPlayRejected);
-};
-
-const fadeMusicIn = () => {
-    if (!musicFadeGain || !audioContext) return;
-    isFadingOut = false;
-    const now = audioContext.currentTime;
-    musicFadeGain.gain.cancelScheduledValues(now);
-    musicFadeGain.gain.setValueAtTime(0, now);
-    musicFadeGain.gain.linearRampToValueAtTime(1, now + MUSIC_FADE_SECONDS);
-};
-
-const fadeMusicOutBeforeEnd = () => {
-    if (!musicElement || !musicFadeGain || !audioContext || isFadingOut) return;
-    //A looping single song never ends, so fading it out would silence it for good
-    if (musicElement.loop) return;
-
-    const remaining = musicElement.duration - musicElement.currentTime;
-    if (!Number.isFinite(remaining) || remaining > MUSIC_FADE_SECONDS) return;
-
-    isFadingOut = true;
-    const now = audioContext.currentTime;
-    //Reach silence exactly at the end, however far into the fade window we are
-    musicFadeGain.gain.cancelScheduledValues(now);
-    musicFadeGain.gain.setValueAtTime(musicFadeGain.gain.value, now);
-    musicFadeGain.gain.linearRampToValueAtTime(0, now + Math.max(remaining, 0.01));
-};
-
-const rememberGenreProgress = () => {
-    if (!musicGenre || !musicElement) return;
-    musicProgress.set(musicGenre.id, {
-        songIndex: musicSongIndex,
-        time: musicElement.currentTime,
+        const deck: MusicDeck = { element, gain };
+        element.addEventListener("timeupdate", () => onDeckTimeUpdate(deck));
+        element.addEventListener("ended", () => onDeckEnded(deck));
+        element.addEventListener("error", () => onDeckError(deck));
+        element.addEventListener("playing", () => onDeckPlaying(deck));
+        return deck;
     });
+
+    return musicDecks;
 };
 
-const playNextSong = () => {
+const onDeckPlaying = (deck: MusicDeck) => {
+    //A crossfade drives its own ramps, so only a deliberate start fades in here
+    if (deckAwaitingFadeIn !== deck) return;
+    deckAwaitingFadeIn = null;
+    rampGain(deck, 1, MUSIC_FADE_IN_SECONDS);
+};
+
+const preloadNextSong = () => {
     if (!musicGenre || musicGenre.songs.length === 0) return;
+    const nextSongIndex = (musicSongIndex + 1) % musicGenre.songs.length;
+    if (preloadedSongIndex === nextSongIndex) return;
+
+    //A one song genre crossfades into itself, which is a seamless loop
+    preloadedSongIndex = nextSongIndex;
+    const standby = standbyDeck();
+    standby.element.src = getSongUrl(musicGenre, musicGenre.songs[nextSongIndex]);
+    standby.element.load();
+};
+
+const startCrossfade = (remaining: number) => {
+    if (!musicGenre || musicGenre.songs.length === 0 || !musicDecks) return;
+
+    const outgoing = activeDeck();
+    const incoming = standbyDeck();
+    const nextSongIndex = (musicSongIndex + 1) % musicGenre.songs.length;
+    //Never fade for longer than the outgoing song has left
+    const seconds = Math.min(MUSIC_CROSSFADE_SECONDS, Math.max(remaining, 0.01));
+
+    isCrossfading = true;
+    if (preloadedSongIndex !== nextSongIndex) {
+        incoming.element.src = getSongUrl(musicGenre, musicGenre.songs[nextSongIndex]);
+    }
+    preloadedSongIndex = null;
     musicErrorStreak = 0;
-    musicSongIndex = (musicSongIndex + 1) % musicGenre.songs.length;
-    loadCurrentSong();
+
+    setGainNow(incoming, 0);
+    deckAwaitingFadeIn = null;
+    if (isPlaying) void incoming.element.play().catch(onPlayRejected);
+
+    rampGain(incoming, 1, seconds);
+    rampGain(outgoing, 0, seconds);
+
+    activeDeckIndex = 1 - activeDeckIndex;
+    musicSongIndex = nextSongIndex;
+
+    //Once it is silent the old song is stopped, so it does not keep streaming unheard
+    if (crossfadeTimeout !== null) window.clearTimeout(crossfadeTimeout);
+    crossfadeTimeout = window.setTimeout(() => {
+        outgoing.element.pause();
+        setGainNow(outgoing, 0);
+        isCrossfading = false;
+        crossfadeTimeout = null;
+    }, seconds * 1000 + 100);
 };
 
-const skipUnplayableSong = () => {
+const cancelCrossfade = () => {
+    if (crossfadeTimeout !== null) {
+        window.clearTimeout(crossfadeTimeout);
+        crossfadeTimeout = null;
+    }
+    isCrossfading = false;
+    preloadedSongIndex = null;
+    if (!musicDecks) return;
+    //Whatever was fading gets silenced; the caller decides what plays next
+    const standby = standbyDeck();
+    standby.element.pause();
+    setGainNow(standby, 0);
+};
+
+const onDeckTimeUpdate = (deck: MusicDeck) => {
+    if (!musicGenre || isCrossfading || !musicDecks || deck !== activeDeck()) return;
+
+    const remaining = deck.element.duration - deck.element.currentTime;
+    if (!Number.isFinite(remaining)) return;
+
+    if (remaining <= MUSIC_PRELOAD_LEAD_SECONDS) preloadNextSong();
+    if (remaining <= MUSIC_CROSSFADE_SECONDS) startCrossfade(remaining);
+};
+
+const onDeckEnded = (deck: MusicDeck) => {
+    //Only reached when the song was too short to crossfade, or timeupdate was starved
+    if (isCrossfading || !musicDecks || deck !== activeDeck()) return;
+    startCrossfade(MUSIC_CROSSFADE_SECONDS);
+};
+
+const onDeckError = (deck: MusicDeck) => {
     if (!musicGenre || musicGenre.songs.length === 0) return;
+    //An empty src is the pause path clearing a deck, not a broken file
+    if (!deck.element.getAttribute("src")) return;
+
     console.warn(`[audioEngine] cannot play ${musicGenre.songs[musicSongIndex]}, skipping`);
     //Give up once every song in the genre has failed in a row
     if (++musicErrorStreak >= musicGenre.songs.length) {
@@ -332,6 +382,56 @@ const skipUnplayableSong = () => {
     loadCurrentSong();
 };
 
+const loadCurrentSong = (startAt = 0) => {
+    if (!musicGenre || musicGenre.songs.length === 0) return;
+    ensureMusicDecks();
+    cancelCrossfade();
+
+    const deck = activeDeck();
+
+    //Drop a seek still waiting on the previous song, or it would move this one
+    if (pendingSeek) {
+        deck.element.removeEventListener("loadedmetadata", pendingSeek);
+        pendingSeek = null;
+    }
+
+    setGainNow(deck, 0);
+    deckAwaitingFadeIn = deck;
+    deck.element.src = getSongUrl(musicGenre, musicGenre.songs[musicSongIndex]);
+
+    if (startAt > 0) {
+        pendingSeek = () => {
+            deck.element.currentTime = startAt;
+            pendingSeek = null;
+        };
+        deck.element.addEventListener("loadedmetadata", pendingSeek, { once: true });
+    }
+
+    //Rejects until the first user gesture, same as a suspended AudioContext
+    if (isPlaying) void deck.element.play().catch(onPlayRejected);
+};
+
+const rememberGenreProgress = () => {
+    if (!musicGenre || !musicDecks) return;
+    musicProgress.set(musicGenre.id, {
+        songIndex: musicSongIndex,
+        time: activeDeck().element.currentTime,
+    });
+};
+
+const pauseMusic = () => {
+    musicDecks?.forEach((deck) => deck.element.pause());
+};
+
+const resumeMusic = () => {
+    if (!musicGenre || !musicDecks) return;
+    const deck = activeDeck();
+    //Fade back in rather than clicking straight to full volume
+    setGainNow(deck, 0);
+    deckAwaitingFadeIn = deck;
+    void deck.element.play().catch(onPlayRejected);
+};
+
 export const setMusicGenreAsync = async (newMusicGenre: MusicGenre | null) => {
     ensureInitialized();
     //Re-selecting the running genre would otherwise restart the current song
@@ -340,7 +440,8 @@ export const setMusicGenreAsync = async (newMusicGenre: MusicGenre | null) => {
     rememberGenreProgress();
 
     if (!newMusicGenre) {
-        musicElement?.pause();
+        cancelCrossfade();
+        pauseMusic();
         musicGenre = null;
         musicSongIndex = 0;
         return;
@@ -360,18 +461,21 @@ export const setMusicGenreAsync = async (newMusicGenre: MusicGenre | null) => {
 //Dev-only inspection handle; Next inlines NODE_ENV so this is stripped from the build
 if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
     (window as unknown as Record<string, unknown>).__music = {
-        element: () => musicElement,
+        decks: () => musicDecks,
+        element: () => musicDecks?.[activeDeckIndex].element,
         state: () => ({
             genre: musicGenre?.id ?? null,
             song: musicGenre?.songs[musicSongIndex] ?? null,
             index: musicSongIndex,
-            currentTime: musicElement?.currentTime,
-            duration: musicElement?.duration,
-            paused: musicElement?.paused,
+            currentTime: musicDecks?.[activeDeckIndex].element.currentTime,
+            duration: musicDecks?.[activeDeckIndex].element.duration,
+            paused: musicDecks?.[activeDeckIndex].element.paused,
             isPlaying,
+            isCrossfading,
+            activeDeckIndex,
         }),
         progress: () => Object.fromEntries(musicProgress),
-        fade: () => musicFadeGain?.gain.value,
+        gains: () => musicDecks?.map((deck) => +deck.gain.gain.value.toFixed(3)),
     };
 }
 

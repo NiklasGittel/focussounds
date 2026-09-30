@@ -60,9 +60,10 @@ export const getMusicGenres = (): MusicGenre[] => {
             title: "LoFi",
             category: SoundCategory.Music,
             songs: [
-                "drifting-through-fog.mp3",
-                "dusk-between-stoops.mp3",
-                "window-seat-daydream.mp3",
+                "Vinyl Nod.m4a",
+                "Dusty Head-Nod.m4a",
+                "Late Train Pantry.m4a",
+                "Late Train Pantry (1).m4a",
             ],
         },
         {
