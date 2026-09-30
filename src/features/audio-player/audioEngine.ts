@@ -43,6 +43,11 @@ let musicSongIndex = 0;
 const musicProgress = new Map<string, { songIndex: number; time: number }>();
 //currentTime can only be set once the song has metadata, so the seek waits for it
 let pendingSeek: (() => void) | null = null;
+//Songs fade in and out through their own gain node, kept separate from the music layer
+//gain so that fading never fights the volume slider
+const MUSIC_FADE_SECONDS = 0.8;
+let musicFadeGain: GainNode | null = null;
+let isFadingOut = false;
 //Counts consecutive failed songs so a genre of unplayable files cannot spin forever
 let musicErrorStreak = 0;
 const ensureInitialized = () => {
@@ -227,12 +232,19 @@ const ensureMusicElement = () => {
     musicElement = new Audio();
     musicElement.preload = "auto";
     //No crossOrigin: the files are served from this same origin, so it would buy nothing
+    musicFadeGain = context.createGain();
+    musicFadeGain.gain.value = 1;
+    musicFadeGain.connect(gains![SoundCategory.Music]);
+
     musicSourceNode = context.createMediaElementSource(musicElement);
-    musicSourceNode.connect(gains![SoundCategory.Music]);
+    musicSourceNode.connect(musicFadeGain);
     //"ended" only fires on a natural end, never on pause or on switching src
     musicElement.addEventListener("ended", playNextSong);
     //A song the browser cannot play (missing file, unsupported codec) is skipped
     musicElement.addEventListener("error", skipUnplayableSong);
+    //"playing" is when audio actually starts, which is when the fade in should begin
+    musicElement.addEventListener("playing", fadeMusicIn);
+    musicElement.addEventListener("timeupdate", fadeMusicOutBeforeEnd);
     return musicElement;
 };
 
@@ -248,6 +260,12 @@ const loadCurrentSong = (startAt = 0) => {
 
     //A single song has nothing to advance to, so let the element loop it natively
     element.loop = musicGenre.songs.length === 1;
+    //Silent until "playing" fades it in, so a new song cannot burst in at full volume
+    if (musicFadeGain && audioContext) {
+        isFadingOut = false;
+        musicFadeGain.gain.cancelScheduledValues(audioContext.currentTime);
+        musicFadeGain.gain.value = 0;
+    }
     element.src = getSongUrl(musicGenre, musicGenre.songs[musicSongIndex]);
 
     if (startAt > 0) {
@@ -260,6 +278,31 @@ const loadCurrentSong = (startAt = 0) => {
 
     //Rejects until the first user gesture, same as a suspended AudioContext
     if (isPlaying) void element.play().catch(onPlayRejected);
+};
+
+const fadeMusicIn = () => {
+    if (!musicFadeGain || !audioContext) return;
+    isFadingOut = false;
+    const now = audioContext.currentTime;
+    musicFadeGain.gain.cancelScheduledValues(now);
+    musicFadeGain.gain.setValueAtTime(0, now);
+    musicFadeGain.gain.linearRampToValueAtTime(1, now + MUSIC_FADE_SECONDS);
+};
+
+const fadeMusicOutBeforeEnd = () => {
+    if (!musicElement || !musicFadeGain || !audioContext || isFadingOut) return;
+    //A looping single song never ends, so fading it out would silence it for good
+    if (musicElement.loop) return;
+
+    const remaining = musicElement.duration - musicElement.currentTime;
+    if (!Number.isFinite(remaining) || remaining > MUSIC_FADE_SECONDS) return;
+
+    isFadingOut = true;
+    const now = audioContext.currentTime;
+    //Reach silence exactly at the end, however far into the fade window we are
+    musicFadeGain.gain.cancelScheduledValues(now);
+    musicFadeGain.gain.setValueAtTime(musicFadeGain.gain.value, now);
+    musicFadeGain.gain.linearRampToValueAtTime(0, now + Math.max(remaining, 0.01));
 };
 
 const rememberGenreProgress = () => {
@@ -328,6 +371,7 @@ if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
             isPlaying,
         }),
         progress: () => Object.fromEntries(musicProgress),
+        fade: () => musicFadeGain?.gain.value,
     };
 }
 
