@@ -60,10 +60,10 @@ export const getMusicGenres = (): MusicGenre[] => {
             title: "LoFi",
             category: SoundCategory.Music,
             songs: [
-                "VinylNod.m4a",
-                "DustyHead-Nod.m4a",
-                "LateTrainPantry.m4a",
-                "LateTrainPantry1.m4a",
+                "VinylNod.webm",
+                "DustyHead-Nod.webm",
+                "LateTrainPantry.webm",
+                "LateTrainPantry1.webm",
             ],
         },
         {
@@ -71,9 +71,9 @@ export const getMusicGenres = (): MusicGenre[] => {
             title: "Piano",
             category: SoundCategory.Music,
             songs: [
-                "QuietFocus.m4a",
-                "QuietFocus1.m4a",
-                "FocusedFlow.m4a"
+                "QuietFocus.webm",
+                "QuietFocus1.webm",
+                "FocusedFlow.webm"
             ],
         },
         {
