@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { setMusicTrackAsync, setBinauralBeatAsync, setIsPlaying, setWhitenoiseAsync as setWhiteNoiseAsync, setVolume } from "./audioEngine";
+import { setMusicGenreAsync, setBinauralBeatAsync, setIsPlaying, setWhitenoiseAsync as setWhiteNoiseAsync, setVolume } from "./audioEngine";
 import { useAudioState } from "./providers/audioStateProvider";
 
 export const useAudioController = () => {
@@ -12,9 +12,9 @@ export const useAudioController = () => {
         );
 
         const unsubMusic = useAudioState.subscribe(
-            (state) => state.musicTrack,
-            (musicTrack) => {
-                setMusicTrackAsync(musicTrack);
+            (state) => state.musicGenre,
+            (musicGenre) => {
+                setMusicGenreAsync(musicGenre);
             },
             { fireImmediately: true }
         );

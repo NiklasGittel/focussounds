@@ -1,7 +1,7 @@
 import { BinauralBeat } from "@/shared/types/binauralBeat";
-import { MusicTrack } from "@/shared/types/musicTrack";
+import { MusicGenre } from "@/shared/types/musicGenre";
 import { SoundCategory } from "@/shared/types/soundCategory";
-import { WhiteNoise } from "@/shared/types/whitenoise";
+import { WhiteNoise } from "@/shared/types/whiteNoise";
 
 export const getBinauralBeats = (): BinauralBeat[] => {
     const binauralBeats: BinauralBeat[] = [
@@ -51,33 +51,37 @@ export const getWhiteNoise = (): WhiteNoise[] => {
     return whiteNoises;
 };
 
-export const getMusicTracks = (): MusicTrack[] => {
-    const musicTracks: MusicTrack[] = [
+export const getMusicGenres = (): MusicGenre[] => {
+    //Each genre streams its songs in this order and wraps around to the first one.
+    //To add songs: drop the files into public/sounds/music/<id>/ and list the filenames here.
+    const musicGenres: MusicGenre[] = [
         {
-            id: "piano1.ogg",
-            title: "Piano 1",
+            id: "lofi",
+            title: "LoFi",
             category: SoundCategory.Music,
+            songs: [
+                "VinylNod.webm",
+                "DustyHead-Nod.webm",
+                "LateTrainPantry.webm",
+                "LateTrainPantry1.webm",
+            ],
         },
         {
-            id: "piano2.ogg",
-            title: "Piano 2",
+            id: "piano",
+            title: "Piano",
             category: SoundCategory.Music,
+            songs: [
+                "QuietFocus.webm",
+                "QuietFocus1.webm",
+                "FocusedFlow.webm"
+            ],
         },
         {
-            id: "drifting-through-fog.mp3",
-            title: "LoFi 1",
+            id: "techno",
+            title: "Techno",
             category: SoundCategory.Music,
-        },
-        {
-            id: "dusk-between-stoops.mp3",
-            title: "LoFi 2",
-            category: SoundCategory.Music,
-        },
-        {
-            id: "window-seat-daydream.mp3",
-            title: "LoFi 3",
-            category: SoundCategory.Music,
+            songs: [],
         }
     ];
-    return musicTracks;
-};  
+    return musicGenres;
+};
