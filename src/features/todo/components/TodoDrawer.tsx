@@ -71,7 +71,7 @@ const TodoDrawer = () => {
                         </p>
                     ) : (
                         <ul className="flex flex-col gap-0.5">
-                            {todos.map((todo) => (
+                            {[...todos].sort((a, b) =>Number(a.done) - Number(b.done)).map((todo) => (
                                 <TodoListItem key={todo.id} todo={todo} />
                             ))}
                         </ul>
