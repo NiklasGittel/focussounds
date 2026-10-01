@@ -53,6 +53,16 @@ const ensureInitialized = () => {
     const constructor = window.AudioContext ?? (window as any).webkitAudioContext;
     audioContext = new constructor();
 
+    //The browser can suspend the context long after playback started, for instance in a
+    //backgrounded tab. The elements then stall with no event of their own, so without
+    //this the transport would keep claiming to play while nothing is audible.
+    audioContext!.addEventListener("statechange", () => {
+        if (!isPlaying || audioContext?.state === "running") return;
+        void audioContext?.resume().then(() => {
+            if (isPlaying && audioContext?.state !== "running") startOnNextGesture();
+        }).catch(() => startOnNextGesture());
+    });
+
     const masterGain = audioContext!.createGain();
     masterGain.gain.value = layerVolumes.master;
     masterGain.connect(audioContext!.destination);
@@ -98,6 +108,21 @@ const startOnNextGesture = () => {
 
     document.addEventListener("pointerdown", onGesture, { capture: true, once: true });
     document.addEventListener("keydown", onGesture, { capture: true, once: true });
+};
+
+//Lets the engine tell the store that playback has genuinely stopped, so the transport
+//cannot keep showing "playing" over silence. The engine never imports the store itself.
+let playbackStoppedHandler: (() => void) | null = null;
+
+export const setPlaybackStoppedHandler = (handler: (() => void) | null) => {
+    playbackStoppedHandler = handler;
+};
+
+//Nothing is coming out of the music layer and nothing is going to start on its own
+const reportMusicStopped = () => {
+    if (!isPlaying || isWaitingForGesture) return;
+    if (musicDecks?.some((deck) => !deck.element.paused)) return;
+    playbackStoppedHandler?.();
 };
 
 //An AbortError only means a newer song replaced this one mid-load, which is expected
@@ -319,22 +344,45 @@ const startCrossfade = (remaining: number) => {
 
     setGainNow(incoming, 0);
     deckAwaitingFadeIn = null;
-    if (isPlaying) void incoming.element.play().catch(onPlayRejected);
 
-    rampGain(incoming, 1, seconds);
-    rampGain(outgoing, 0, seconds);
+    //Handing the gain over before the next song is audible would fade the current one
+    //out into silence, so the swap waits until play() reports that it really started
+    const commit = () => {
+        rampGain(incoming, 1, seconds);
+        rampGain(outgoing, 0, seconds);
 
-    activeDeckIndex = 1 - activeDeckIndex;
-    musicSongIndex = nextSongIndex;
+        activeDeckIndex = 1 - activeDeckIndex;
+        musicSongIndex = nextSongIndex;
 
-    //Once it is silent the old song is stopped, so it does not keep streaming unheard
-    if (crossfadeTimeout !== null) window.clearTimeout(crossfadeTimeout);
-    crossfadeTimeout = window.setTimeout(() => {
-        outgoing.element.pause();
-        setGainNow(outgoing, 0);
+        //Once it is silent the old song is stopped, so it does not keep streaming unheard
+        if (crossfadeTimeout !== null) window.clearTimeout(crossfadeTimeout);
+        crossfadeTimeout = window.setTimeout(() => {
+            outgoing.element.pause();
+            setGainNow(outgoing, 0);
+            isCrossfading = false;
+            crossfadeTimeout = null;
+        }, seconds * 1000 + 100);
+    };
+
+    //The next song could not start, so keep the current one: it plays on to its end and
+    //"ended" takes over from there, rather than leaving both decks silent
+    const abandon = (error: unknown) => {
+        if (!isCrossfading) return;
+        console.warn("[audioEngine] could not start the next song, staying on the current one", error);
         isCrossfading = false;
-        crossfadeTimeout = null;
-    }, seconds * 1000 + 100);
+        preloadedSongIndex = null;
+        incoming.element.pause();
+        setGainNow(incoming, 0);
+        setGainNow(outgoing, 1);
+        //If the current song had already run out there is nothing left playing
+        reportMusicStopped();
+    };
+
+    if (!isPlaying) return;
+    void incoming.element.play().then(commit).catch((error) => {
+        abandon(error);
+        onPlayRejected(error);
+    });
 };
 
 const cancelCrossfade = () => {
@@ -384,6 +432,7 @@ const onDeckError = (deck: MusicDeck) => {
     //Give up once every song in the genre has failed in a row
     if (++musicErrorStreak >= musicGenre.songs.length) {
         musicErrorStreak = 0;
+        reportMusicStopped();
         return;
     }
     musicSongIndex = (musicSongIndex + 1) % musicGenre.songs.length;

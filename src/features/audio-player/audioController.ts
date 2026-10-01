@@ -1,10 +1,15 @@
 "use client";
 import { useEffect } from "react";
-import { setMusicGenreAsync, setBinauralBeatAsync, setIsPlaying, setWhitenoiseAsync as setWhiteNoiseAsync, setVolume } from "./audioEngine";
+import { setMusicGenreAsync, setBinauralBeatAsync, setIsPlaying, setWhitenoiseAsync as setWhiteNoiseAsync, setVolume, setPlaybackStoppedHandler } from "./audioEngine";
 import { useAudioState } from "./providers/audioStateProvider";
 
 export const useAudioController = () => {
     useEffect(() => {
+        //Keep the transport honest: if the engine cannot play any more, stop claiming to
+        setPlaybackStoppedHandler(() => {
+            if (useAudioState.getState().isPlaying) useAudioState.getState().togglePlaying();
+        });
+
         const unsubPlaying = useAudioState.subscribe(
             (state) => state.isPlaying,
             (isPlaying) => setIsPlaying(isPlaying),
@@ -50,6 +55,7 @@ export const useAudioController = () => {
         );
 
         return () => {
+            setPlaybackStoppedHandler(null);
             unsubPlaying();
             unsubMusic();
             unsubBinaural();
