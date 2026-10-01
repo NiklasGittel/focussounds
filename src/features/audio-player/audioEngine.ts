@@ -1,7 +1,7 @@
 import { SoundCategory } from "@/shared/types/soundCategory";
 import type { MusicGenre } from "@/shared/types/musicGenre";
 import { BinauralBeat } from "@/shared/types/binauralBeat";
-import { WhiteNoise } from "@/shared/types/whitenoise";
+import { WhiteNoise } from "@/shared/types/whiteNoise";
 
 let isPlaying = false;
 //These need to be nullable because the AudioContext is not available on the server side

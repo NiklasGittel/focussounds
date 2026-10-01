@@ -1,7 +1,7 @@
 import { BinauralBeat } from "@/shared/types/binauralBeat";
 import { MusicGenre } from "@/shared/types/musicGenre";
 import { SoundCategory } from "@/shared/types/soundCategory";
-import { WhiteNoise } from "@/shared/types/whitenoise";
+import { WhiteNoise } from "@/shared/types/whiteNoise";
 
 export const getBinauralBeats = (): BinauralBeat[] => {
     const binauralBeats: BinauralBeat[] = [

@@ -6,7 +6,7 @@ import SoundCard from "./SoundCard";
 import { useAudioState } from "../providers/audioStateProvider";
 import { Label } from "@/components/ui/label";
 import { BinauralBeat } from "@/shared/types/binauralBeat";
-import { WhiteNoise } from "@/shared/types/whitenoise";
+import { WhiteNoise } from "@/shared/types/whiteNoise";
 
 interface SoundCardRowProps {
     sounds: MusicGenre[] | BinauralBeat[] | WhiteNoise[];

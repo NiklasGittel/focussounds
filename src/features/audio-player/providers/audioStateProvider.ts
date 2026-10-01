@@ -3,7 +3,7 @@ import { devtools, persist, subscribeWithSelector } from "zustand/middleware";
 import { MusicGenre } from "@/shared/types/musicGenre";
 import { getMusicGenres } from "../soundService";
 import { BinauralBeat } from "@/shared/types/binauralBeat";
-import { WhiteNoise } from "@/shared/types/whitenoise";
+import { WhiteNoise } from "@/shared/types/whiteNoise";
 
 interface AudioState {
     isPlaying: boolean;
