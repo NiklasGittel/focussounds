@@ -3,6 +3,7 @@ import AudioControls from "@/features/audio-player/components/AudioControls";
 import SoundCardRow from "@/features/audio-player/components/SoundCardRow";
 import TodoDrawer from "@/features/todo/components/TodoDrawer";
 import { getBinauralBeats, getMusicGenres, getWhiteNoise } from "@/features/audio-player/soundService";
+import PomoTimer from "@/features/pomo-timer/PomoTimer";
 
 export default function Home() {
 
@@ -14,11 +15,10 @@ export default function Home() {
         <SoundCardRow sounds={getBinauralBeats()} label="Binaural Beats" />
         <SoundCardRow sounds={getWhiteNoise()} label="White Noise" />
       </div>
-      <div className="relative flex w-full flex-row items-center justify-center">
+      <div className="flex w-full flex-row items-center justify-between p-1">
+        <PomoTimer />
         <AudioControls />
-        <div className="absolute right-0">
-          <TodoDrawer />
-        </div>
+        <TodoDrawer />
       </div>
     </main>
   );
