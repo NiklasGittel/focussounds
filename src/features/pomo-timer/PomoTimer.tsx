@@ -5,6 +5,7 @@ import { ChevronLast, CoffeeIcon, TimerIcon, TimerOffIcon, TimerReset } from "lu
 import { Button } from "@/components/ui/button";
 import { ContextMenu, ContextMenuContent, ContextMenuGroup, ContextMenuItem, ContextMenuLabel, ContextMenuRadioGroup, ContextMenuRadioItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { playTimerElapsedSound } from "../audio-player/audioEngine";
+import AnimatedTime from "./AnimatedTime";
 
 const PomoTimer = () => {
     const { workDuration, pauseDuration, pausedAt, timerEnd, currentTimer, setWorkDuration, setPauseDuration, toggleTimer, resetTimer, skipTimer } = useTimerStore();
@@ -75,7 +76,7 @@ const PomoTimer = () => {
         if (!timerEnd) remainingTime =  ((currentTimer === "work" ? workDuration : pauseDuration) ?? 0) * 60 * 1000;
         else if (pausedAt) remainingTime = timerEnd - pausedAt;
         else remainingTime = timerEnd - (now ?? Date.now());
-        return remainingTime < 0 ? 0 : remainingTime;
+        return Math.max(remainingTime, 0);
     };
 
     return (
@@ -83,7 +84,7 @@ const PomoTimer = () => {
             <ContextMenu>
                 <ContextMenuTrigger className="flex min-w-xs w-full items-center justify-start ">
                     <Button variant={isRunning ? "default" : "outline"} onClick={toggleTimer} >
-                        {isDisabled ? <TimerOffIcon /> : <>{currentTimer === "work" ? <TimerIcon /> : <CoffeeIcon />}<span className="tabular-nums">{formatTime(getRemainingTime())}</span></>}
+                        {isDisabled ? <TimerOffIcon /> : <>{currentTimer === "work" ? <TimerIcon /> : <CoffeeIcon />}<AnimatedTime text={formatTime(getRemainingTime())} /></>}
                     </Button>
                 </ContextMenuTrigger>
                 <ContextMenuContent>
