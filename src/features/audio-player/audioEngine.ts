@@ -598,3 +598,15 @@ const stopBinauralBeat = () => {
     });
     binauralOscillators = null;
 }
+
+
+export const playTimerElapsedSound = async () => {
+    const context = ensureInitialized();
+    const buffer = await loadBuffer("/sounds/timerElapsed.wav");
+
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(gains!.master);
+    source.addEventListener("ended", () => source.disconnect(), { once: true });
+    source.start();
+};
