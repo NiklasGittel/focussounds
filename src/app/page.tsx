@@ -3,7 +3,7 @@ import AudioControls from "@/features/audio-player/components/AudioControls";
 import SoundCardRow from "@/features/audio-player/components/SoundCardRow";
 import TodoDrawer from "@/features/todo/components/TodoDrawer";
 import { getBinauralBeats, getMusicGenres, getWhiteNoise } from "@/features/audio-player/soundService";
-import PomoTimer from "@/features/pomo-timer/PomoTimer";
+import PomoTimer from "@/features/timer/components/Timer";
 
 export default function Home() {
 
